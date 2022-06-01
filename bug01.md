@@ -1,5 +1,17 @@
 
+```rust
 rg "scan\("
+```
+
+* iox_query/src/provider.rs
+
+```rust
+async fn scan()
+```
+
+```rust
+fn build_scan_plan(
+```
 
 * iox_query/src/provider.rs line 747
 
