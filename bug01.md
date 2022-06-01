@@ -6,7 +6,71 @@ rg "scan\("
 * iox_query/src/provider.rs
 
 ```rust
-async fn scan()
+#[async_trait]
+impl TableProvider for ChunkTableProvider {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    /// Schema with all available columns across all chunks
+    fn schema(&self) -> ArrowSchemaRef {
+        self.arrow_schema()
+    }
+
+    async fn scan(
+        &self,
+        projection: &Option<Vec<usize>>,
+        filters: &[Expr],
+        _limit: Option<usize>,
+    ) -> std::result::Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        trace!("Create a scan node for ChunkTableProvider");
+
+        // Note that `filters` don't actually need to be evaluated in
+        // the scan for the plans to be correct, they are an extra
+        // optimization for providers which can offer them
+        let predicate = PredicateBuilder::default()
+            .add_pushdown_exprs(filters)
+            .build();
+
+        // Now we have a second attempt to prune out chunks based on
+        // metadata using the pushed down predicate (e.g. in SQL).
+        let chunks: Vec<Arc<dyn QueryChunk>> = self.chunks.to_vec();
+        let num_initial_chunks = chunks.len();
+        let chunks = self.chunk_pruner.prune_chunks(
+            self.table_name(),
+            self.iox_schema(),
+            chunks,
+            &predicate,
+        );
+        debug!(%predicate, num_initial_chunks, num_final_chunks=chunks.len(), "pruned with pushed down predicates");
+
+        // Figure out the schema of the requested output
+        let scan_schema = match projection {
+            Some(indices) => Arc::new(self.iox_schema.select_by_indices(indices)),
+            None => Arc::clone(&self.iox_schema),
+        };
+
+        // This debug shows the self.arrow_schema() includes all columns in all chunks
+        // which means the schema of all chunks are merged before invoking this scan
+        debug!(schema=?self.arrow_schema(), "All chunks schema");
+        // However, the schema of each chunk is still in its original form which does not
+        // include the merged columns of other chunks. The code below (put in comments on purpose) proves it
+        // for chunk in chunks.clone() {
+        //     trace!("Schema of chunk {}: {:#?}", chunk.id(), chunk.schema());
+        // }
+
+        let mut deduplicate =
+            Deduplicater::new().with_execution_context(self.ctx.child_ctx("deduplicator"));
+        let plan = deduplicate.build_scan_plan(
+            Arc::clone(&self.table_name),
+            scan_schema,
+            chunks,
+            predicate,
+            self.sort_key.clone(),
+        )?;
+
+        Ok(plan)
+    }
 ```
 
 ```rust
