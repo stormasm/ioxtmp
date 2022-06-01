@@ -1,7 +1,7 @@
 
 rg "scan\("
 
-* iox_query/src/provider.rs
+* iox_query/src/provider.rs line 747
 
 ```rust
 fn build_deduplicate_plan_for_overlapped_chunks(
@@ -22,10 +22,20 @@ fn build_deduplicate_plan_for_overlapped_chunks(
         chunks.sort_unstable_by_key(|c| (c.order(), c.id()));
         chunks
     };
-
 ```
 
+* compactor/src/query.rs line 259
 
+```rust
+// Order of the chunk so they can be deduplicate correctly
+fn order(&self) -> ChunkOrder {
+    let seq_num = self.min_sequence_number.get();
+    let seq_num = u32::try_from(seq_num)
+        .expect("Sequence number should have been converted to chunk order successfully");
+    ChunkOrder::new(seq_num)
+        .expect("Sequence number should have been converted to chunk order successfully")
+}
+```
 
 
 
