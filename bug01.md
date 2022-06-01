@@ -1,4 +1,6 @@
 
+rg "scan\("
+
 * iox_query/src/provider.rs
 
 ```rust
